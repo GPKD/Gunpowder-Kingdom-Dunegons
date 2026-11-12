@@ -1063,6 +1063,38 @@ table{width:100%;}
 #section-home .brace-3d-viewer:active canvas{cursor:grabbing}
 #section-home .brace-3d-caption small{letter-spacing:.12em}
 @media(max-width:560px){#section-home .brace-3d-viewer{height:230px;min-height:190px}}
+
+/* Admiralty Brace Exotic rarity treatment: animated text + moving-spectrum tag. */
+#section-home .brace-plate-title{display:inline-flex;align-items:center;gap:9px;min-width:0}
+#section-home .brace-exotic-tag{
+ display:inline-flex;align-items:center;justify-content:center;position:relative;
+ padding:3px 7px 2px;border:1px solid transparent;border-radius:2px;
+ background:linear-gradient(#17110f,#17110f) padding-box,
+            linear-gradient(110deg,#e9a4d3,#93cfe6,#c0a2f5,#e7bf9b,#e9a4d3) border-box;
+ background-size:auto,260% 100%;
+ color:#f0d8e9;font:900 7px/1.2 var(--sans);letter-spacing:.2em;
+ animation:exoticGradientFlow 7s linear infinite;
+ box-shadow:0 0 13px #c19bd01b
+}
+#section-home .brace-exotic-gradient{
+ display:inline-block;font-weight:900;letter-spacing:.17em;
+ background:linear-gradient(90deg,#f4afd8 0%,#a9d9ed 30%,#d7b8ff 58%,#efc39f 82%,#f4afd8 100%);
+ background-size:260% 100%;background-position:0% 50%;
+ -webkit-background-clip:text;background-clip:text;color:transparent;
+ animation:exoticGradientFlow 8s linear infinite;
+}
+#section-home .brace-3d-caption{gap:12px;flex-wrap:wrap}
+#section-home .brace-3d-caption .brace-model-status{margin-left:auto;text-align:right}
+@media(max-width:560px){
+ #section-home .brace-plate-title{gap:6px}
+ #section-home .brace-exotic-tag{font-size:6px;padding:2px 5px}
+ #section-home .brace-exotic-gradient{font-size:8px;letter-spacing:.12em}
+ #section-home .brace-3d-caption .brace-model-status{font-size:6px}
+}
+@media(prefers-reduced-motion:reduce){
+ #section-home .brace-exotic-tag,#section-home .brace-exotic-gradient{animation:none!important}
+}
+
 </style>
 <script type="importmap">
 {
@@ -1114,7 +1146,7 @@ table{width:100%;}
   </div>
   <div class="fg-opening-art" aria-label="Featured Admiralty Brace display">
    <div class="fg-art-caption"><span>ROYAL ARMORY</span><span>FEATURED CARRY / 001</span></div>
-   <div class="fg-art-stage"><div class="fg-art-glow"></div><div class="armory-plate" id="heroWeaponFeature"><div class="plate-head"><span>ADMIRALTY BRACE</span><span>FLINTLOCK ISSUE</span></div><div class="brace-3d-shell"><div class="brace-3d-caption"><span>ADMIRALTY BRACE</span><small class="brace-model-status" role="status" aria-live="polite">LOADING 3D MODEL…</small></div><div class="brace-3d-viewer" id="braceThreeViewport" role="application" tabindex="0"
+   <div class="fg-art-stage"><div class="fg-art-glow"></div><div class="armory-plate" id="heroWeaponFeature"><div class="plate-head"><span class="brace-plate-title">ADMIRALTY BRACE <i class="brace-exotic-tag">EXOTIC</i></span><span>ROYAL ARMORY / EXOTIC ISSUE</span></div><div class="brace-3d-shell"><div class="brace-3d-caption"><span class="brace-exotic-gradient">ADMIRALTY BRACE</span><small class="brace-model-status" role="status" aria-live="polite">LOADING 3D MODEL…</small></div><div class="brace-3d-viewer" id="braceThreeViewport" role="application" tabindex="0"
  aria-label="Interactive 3D Admiralty Brace model. Drag to rotate, scroll to zoom, and right-drag to pan."
  aria-busy="true">
  <canvas class="brace-3d-canvas" aria-hidden="true"></canvas>
@@ -1881,9 +1913,7 @@ document.querySelectorAll('[data-open-section]').forEach(button=>button.addEvent
  const statusNode = document.querySelector('#heroWeaponFeature .brace-model-status');
  if (!mount) return;
 
- const setStatus = (message) => {
-  if (statusNode) statusNode.textContent = message;
- };
+ const setStatus = (message) => { if (statusNode) statusNode.textContent = message; };
  const setError = (message, error) => {
   mount.setAttribute('aria-busy', 'false');
   setStatus(message);
@@ -1894,9 +1924,16 @@ document.querySelectorAll('[data-open-section]').forEach(button=>button.addEvent
   let renderer;
   let resizeObserver;
   let animationStarted = false;
+  let controls;
+  let camera;
+  let turntable;
+  let clock;
+  let centeredBounds;
+  let fitDirection;
+  let fitMargin = 1.16;
+
   try {
    setStatus('LOADING 3D RENDERER…');
-
    const [
     THREE,
     { GLTFLoader },
@@ -1923,9 +1960,8 @@ document.querySelectorAll('[data-open-section]').forEach(button=>button.addEvent
    const scene = new THREE.Scene();
    scene.background = null;
 
-   // This asset is authored Z-up: its long barrel runs along X and its grip
-   // hangs along Z. Keep that native orientation so the pistol stands correctly.
-   const camera = new THREE.PerspectiveCamera(34, initialWidth / initialHeight, 0.001, 1000);
+   // The source GLB is authored Z-up, with its barrel along X and grip along Z.
+   camera = new THREE.PerspectiveCamera(34, initialWidth / initialHeight, 0.001, 1000);
    camera.up.set(0, 0, 1);
 
    renderer = new THREE.WebGLRenderer({
@@ -1942,10 +1978,8 @@ document.querySelectorAll('[data-open-section]').forEach(button=>button.addEvent
    renderer.toneMappingExposure = 1.32;
    renderer.setClearColor(0x000000, 0);
 
-   // PBR studio environment: preserve the GLB's authored materials and
-   // illuminate the walnut grip, brass trim and worn steel more evenly.
+   // Studio environment lighting keeps the original GLB PBR colors/materials.
    const pmrem = new THREE.PMREMGenerator(renderer);
-   pmrem.compileEquirectangularShader();
    const room = new RoomEnvironment();
    const environment = pmrem.fromScene(room, 0.04).texture;
    scene.environment = environment;
@@ -1955,25 +1989,20 @@ document.querySelectorAll('[data-open-section]').forEach(button=>button.addEvent
 
    const hemi = new THREE.HemisphereLight(0xffead5, 0x302016, 1.45);
    scene.add(hemi);
-
    const key = new THREE.DirectionalLight(0xffe5c6, 2.4);
    key.position.set(-3.5, 6.0, 5.0);
    scene.add(key);
-
    const fill = new THREE.DirectionalLight(0xc6d4e8, 1.35);
    fill.position.set(4.5, 4.0, 1.5);
    scene.add(fill);
-
    const rim = new THREE.DirectionalLight(0xffc27c, 1.75);
    rim.position.set(-3.5, -4.5, 3.5);
    scene.add(rim);
 
-   // The turntable uses the GLB's native vertical (Z) axis. The camera does
-   // not orbit automatically; only this centered model group turns.
-   const turntable = new THREE.Group();
+   turntable = new THREE.Group();
    scene.add(turntable);
 
-   const controls = new OrbitControls(camera, renderer.domElement);
+   controls = new OrbitControls(camera, renderer.domElement);
    controls.enableDamping = true;
    controls.dampingFactor = 0.065;
    controls.enableRotate = true;
@@ -1987,8 +2016,7 @@ document.querySelectorAll('[data-open-section]').forEach(button=>button.addEvent
 
    let dragging = false;
    let resumeSpinAt = 0;
-   const clock = new THREE.Clock();
-
+   clock = new THREE.Clock();
    controls.addEventListener('start', () => { dragging = true; });
    controls.addEventListener('end', () => {
     dragging = false;
@@ -1997,7 +2025,6 @@ document.querySelectorAll('[data-open-section]').forEach(button=>button.addEvent
 
    const dracoLoader = new DRACOLoader();
    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
-
    const ktx2Loader = new KTX2Loader();
    ktx2Loader.setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/libs/basis/');
    ktx2Loader.detectSupport(renderer);
@@ -2014,22 +2041,68 @@ document.querySelectorAll('[data-open-section]').forEach(button=>button.addEvent
      if (event.lengthComputable && event.total > 0) {
       const pct = Math.min(99, Math.round((event.loaded / event.total) * 100));
       setStatus(`LOADING ADMIRALTY BRACE · ${pct}%`);
-     } else {
-      setStatus('LOADING ADMIRALTY BRACE…');
-     }
+     } else setStatus('LOADING ADMIRALTY BRACE…');
     }, reject);
    });
 
-   gltf.scene.updateMatrixWorld(true);
-   const sourceBounds = new THREE.Box3().setFromObject(gltf.scene);
-   if (sourceBounds.isEmpty()) throw new Error('The GLB contains no visible mesh geometry.');
+   // The supplied GLB has 16 named meshes but omits NORMAL attributes.
+   // glTF requires renderers to calculate flat normals when they are absent.
+   // Convert indexed geometry to non-indexed before calculating them so every
+   // triangle receives its own flat normal, matching the glTF fallback rule.
+   const backfaceRepairNames = new Set([
+    'MaterialGroup_08_Darkened_steel_edges',
+    'MaterialGroup_09_Aged_brass',
+    'MaterialGroup_12_Dark_walnut_grip'
+   ]);
+   let sourceMeshCount = 0;
+   let computedNormalCount = 0;
+   let doubleSidedRepairCount = 0;
+   gltf.scene.updateWorldMatrix(true, true);
+   gltf.scene.traverse((object) => {
+    if (!object.isMesh || !object.geometry) return;
+    sourceMeshCount++;
 
+    const geometry = object.geometry;
+    if (!geometry.getAttribute('normal') && geometry.getAttribute('position')) {
+     const flatGeometry = geometry.index ? geometry.toNonIndexed() : geometry.clone();
+     flatGeometry.computeVertexNormals();
+     flatGeometry.computeBoundingBox();
+     flatGeometry.computeBoundingSphere();
+     flatGeometry.name = geometry.name || object.name || 'GPKD flat-normal geometry';
+     object.geometry = flatGeometry;
+     computedNormalCount++;
+    }
+
+    // Three mesh groups in this exact file have inconsistent/reversed winding.
+    // DoubleSide prevents valid exterior faces in those groups being discarded
+    // by the default one-sided material back-face culling.
+    const needsBackfaceRepair = backfaceRepairNames.has(object.name);
+    if (object.material) {
+     const patchMaterial = (material) => {
+      const patched = material.clone();
+      if (needsBackfaceRepair) patched.side = THREE.DoubleSide;
+      patched.needsUpdate = true;
+      return patched;
+     };
+     object.material = Array.isArray(object.material)
+      ? object.material.map(patchMaterial)
+      : patchMaterial(object.material);
+     if (needsBackfaceRepair) doubleSidedRepairCount++;
+    }
+    object.castShadow = true;
+    object.receiveShadow = true;
+   });
+
+   if (!sourceMeshCount) throw new Error('The GLB scene contains no mesh objects.');
+   gltf.scene.updateWorldMatrix(true, true);
+   const sourceBounds = new THREE.Box3().setFromObject(gltf.scene, true);
+   if (sourceBounds.isEmpty()) throw new Error('The GLB contains no visible mesh geometry.');
    const sourceCenter = sourceBounds.getCenter(new THREE.Vector3());
    const sourceSize = sourceBounds.getSize(new THREE.Vector3());
 
-   // Each display pistol is a centered clone of the supplied GLB. The actual
-   // file contains one complete pistol with a walnut grip; two instances
-   // restore the paired, slightly staggered Admiralty Brace presentation.
+   // Build two staggered instances from the complete supplied pistol model.
+   // Geometry/material repairs above are applied before cloning, so both
+   // displayed pistols inherit every mesh, flat normal, and winding repair.
    const makePistol = ({ x, y, z, tilt }) => {
     const holder = new THREE.Group();
     const model = gltf.scene.clone(true);
@@ -2037,15 +2110,6 @@ document.querySelectorAll('[data-open-section]').forEach(button=>button.addEvent
     holder.add(model);
     holder.position.set(x, y, z);
     holder.rotation.z = tilt;
-    model.traverse((object) => {
-     if (!object.isMesh) return;
-     object.castShadow = true;
-     object.receiveShadow = true;
-     if (object.material) {
-      const materials = Array.isArray(object.material) ? object.material : [object.material];
-      materials.forEach((material) => { material.needsUpdate = true; });
-     }
-    });
     turntable.add(holder);
     return holder;
    };
@@ -2053,53 +2117,73 @@ document.querySelectorAll('[data-open-section]').forEach(button=>button.addEvent
    const spreadX = sourceSize.x * 0.065;
    const spreadY = sourceSize.y * 0.22;
    const spreadZ = sourceSize.z * 0.045;
-
-   // Back pistol: slightly upper-left. Front pistol: slightly lower-right.
-   // The small depth separation lets the two grips and silhouettes read clearly.
    makePistol({ x: -spreadX, y: -spreadY, z: spreadZ, tilt: -0.035 });
    makePistol({ x: spreadX, y: spreadY, z: -spreadZ, tilt: 0.035 });
 
    turntable.updateMatrixWorld(true);
-   const pairBounds = new THREE.Box3().setFromObject(turntable);
+   const pairBounds = new THREE.Box3().setFromObject(turntable, true);
    const pairCenter = pairBounds.getCenter(new THREE.Vector3());
-   const pairSize = pairBounds.getSize(new THREE.Vector3());
-   // Symmetric offsets keep the pair centered, but account for any tiny
-   // bounding-box imbalance before beginning the slow turn.
+   centeredBounds = pairBounds.clone().translate(pairCenter.clone().negate());
    turntable.position.sub(pairCenter);
 
-   const verticalHalfFov = THREE.MathUtils.degToRad(camera.fov * 0.5);
-   const horizontalHalfFov = Math.atan(Math.tan(verticalHalfFov) * camera.aspect);
-   const fitHorizontal = pairSize.x / (2 * Math.tan(horizontalHalfFov));
-   const fitVertical = pairSize.z / (2 * Math.tan(verticalHalfFov));
-   const fitDepth = pairSize.y * 1.15;
-   const fitDistance = Math.max(fitHorizontal, fitVertical, fitDepth) * 1.18;
-
-   // View the broad side of the pistol from a gentle three-quarter angle.
-   // Z remains screen-up, so both wooden grips are visible from the first frame.
+   // Fit using all eight bounds corners sampled throughout a full Z-axis turn.
+   // This is more reliable than fitting only the initial static orientation:
+   // it reserves space for the widest projected pose at every spin angle.
    const viewDirection = new THREE.Vector3(0.18, 1, 0.14).normalize();
-   camera.position.copy(viewDirection.multiplyScalar(fitDistance));
-   camera.near = Math.max(fitDistance / 5000, 0.001);
-   camera.far = Math.max(fitDistance * 15, 100);
-   camera.updateProjectionMatrix();
+   fitDirection = viewDirection.clone();
+   const computeTurntableFitDistance = (direction, aspect) => {
+    const dir = direction.clone().normalize();
+    const worldUp = new THREE.Vector3(0, 0, 1);
+    const right = new THREE.Vector3().crossVectors(dir, worldUp).normalize();
+    const screenUp = new THREE.Vector3().crossVectors(right, dir).normalize();
+    const vHalf = THREE.MathUtils.degToRad(camera.fov * 0.5);
+    const hHalf = Math.atan(Math.tan(vHalf) * Math.max(0.1, aspect));
+    const tanH = Math.max(0.001, Math.tan(hHalf));
+    const tanV = Math.max(0.001, Math.tan(vHalf));
+    const corners = [];
+    for (const x of [centeredBounds.min.x, centeredBounds.max.x])
+     for (const y of [centeredBounds.min.y, centeredBounds.max.y])
+      for (const z of [centeredBounds.min.z, centeredBounds.max.z]) corners.push(new THREE.Vector3(x, y, z));
 
+    let required = 0;
+    const steps = 72;
+    for (let i = 0; i < steps; i++) {
+     const angle = (i / steps) * Math.PI * 2;
+     const c = Math.cos(angle), s = Math.sin(angle);
+     for (const p of corners) {
+      const rotated = new THREE.Vector3(p.x * c - p.y * s, p.x * s + p.y * c, p.z);
+      const horizontal = Math.abs(rotated.dot(right));
+      const vertical = Math.abs(rotated.dot(screenUp));
+      const towardCamera = rotated.dot(dir);
+      required = Math.max(required, towardCamera + horizontal / tanH, towardCamera + vertical / tanV);
+     }
+    }
+    return Math.max(0.1, required * fitMargin);
+   };
+
+   const startingFitDistance = computeTurntableFitDistance(viewDirection, initialWidth / initialHeight);
+   camera.position.copy(viewDirection).multiplyScalar(startingFitDistance);
+   camera.near = Math.max(startingFitDistance / 10000, 0.001);
+   camera.far = Math.max(startingFitDistance * 100, 1000);
+   camera.updateProjectionMatrix();
    controls.target.set(0, 0, 0);
-   controls.minDistance = Math.max(fitDistance * 0.32, 0.01);
-   controls.maxDistance = Math.max(fitDistance * 5, 100);
+   controls.minDistance = Math.max(startingFitDistance * 0.25, 0.01);
+   controls.maxDistance = Math.max(startingFitDistance * 5, 100);
    controls.update();
 
    mount.setAttribute('aria-busy', 'false');
-   setStatus('DUAL MODEL READY · SLOW UPRIGHT SPIN · DRAG TO ROTATE · SCROLL TO ZOOM');
-
-   let meshCount = 0;
-   gltf.scene.traverse((object) => { if (object.isMesh) meshCount++; });
-   console.info('[GPKD Admiralty 3D] Loaded GLB and built paired display', {
+   setStatus('DUAL MODEL READY · FULL MODEL · SLOW UPRIGHT SPIN · DRAG TO ROTATE · SCROLL TO ZOOM');
+   console.info('[GPKD Admiralty 3D] Verified model groups and applied render repairs', {
     file: './ab.glb',
-    sourceMeshes: meshCount,
+    sourceMeshes: sourceMeshCount,
+    computedFlatNormals: computedNormalCount,
+    doubleSidedWindingRepairs: doubleSidedRepairCount,
     displayInstances: 2,
+    displayMeshInstances: sourceMeshCount * 2,
     sourceDimensions: { x: sourceSize.x, y: sourceSize.y, z: sourceSize.z },
-    turnAxis: 'Z'
+    turnAxis: 'Z',
+    cameraFit: '72-angle full-turn projected bounds'
    });
-
    dracoLoader.dispose();
 
    const resize = () => {
@@ -2109,12 +2193,26 @@ document.querySelectorAll('[data-open-section]').forEach(button=>button.addEvent
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+
+    // On narrow panels, pull back only when necessary; preserve the user's
+    // current viewing direction and never reset their manual orbit/zoom.
+    const currentDirection = camera.position.clone().sub(controls.target);
+    const currentDistance = currentDirection.length();
+    currentDirection.normalize();
+    const neededDistance = computeTurntableFitDistance(currentDirection, camera.aspect);
+    if (currentDistance < neededDistance) {
+     camera.position.copy(controls.target).addScaledVector(currentDirection, neededDistance);
+    }
+    camera.near = Math.max(neededDistance / 10000, 0.001);
+    camera.far = Math.max(neededDistance * 100, 1000);
+    camera.updateProjectionMatrix();
+    controls.minDistance = Math.max(neededDistance * 0.25, 0.01);
+    controls.update();
    };
 
    resizeObserver = new ResizeObserver(resize);
    resizeObserver.observe(mount);
    window.addEventListener('resize', resize, { passive: true });
-
    renderer.domElement.addEventListener('webglcontextlost', (event) => {
     event.preventDefault();
     setError('3D GRAPHICS PAUSED · RELOAD THE PAGE');
@@ -2122,11 +2220,7 @@ document.querySelectorAll('[data-open-section]').forEach(button=>button.addEvent
 
    renderer.setAnimationLoop(() => {
     const delta = Math.min(clock.getDelta(), 0.05);
-    // The GLB is Z-up, so this produces a level turntable spin rather than
-    // a barrel-axis roll or an orbital camera movement.
-    if (!dragging && performance.now() >= resumeSpinAt) {
-     turntable.rotation.z += delta * 0.14;
-    }
+    if (!dragging && performance.now() >= resumeSpinAt) turntable.rotation.z += delta * 0.14;
     controls.update();
     renderer.render(scene, camera);
    });
@@ -2134,9 +2228,10 @@ document.querySelectorAll('[data-open-section]').forEach(button=>button.addEvent
   } catch (error) {
    if (resizeObserver) resizeObserver.disconnect();
    if (renderer && animationStarted) renderer.setAnimationLoop(null);
-   setError(`3D VIEWER ERROR · ${String(error?.message || 'CHECK NETWORK').slice(0, 45)}`, error);
+   setError(`3D VIEWER ERROR · ${String(error?.message || 'CHECK NETWORK').slice(0, 55)}`, error);
   }
  })();
 })();
 </script>
+
 </body></html>
